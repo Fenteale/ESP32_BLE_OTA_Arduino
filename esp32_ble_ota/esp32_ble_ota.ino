@@ -114,10 +114,15 @@ class MyCallbacks: public BLECharacteristicCallbacks {
     }
 
     void onWrite(BLECharacteristic *pCharacteristic) {
+      //FEN: This gets called when a characteristic is trying to write 
       uint8_t* pData;
       std::string value = pCharacteristic->getValue();
       int len = value.length();
+      //FEN: I think getValue and getData return the same underlying data, except getValue
+      // returns a string instead of a buffer. This allows us to get the length of it,
+      // which is the same as the length of the buffer.
       pData = pCharacteristic->getData();
+      //FEN: pData is a buffer containing all data 
       if (pData != NULL) {
         //        Serial.print("Write callback for characteristic ");
         //        Serial.print(pCharacteristic->getUUID().toString().c_str());
@@ -129,6 +134,7 @@ class MyCallbacks: public BLECharacteristicCallbacks {
         //        }
         //        Serial.println();
 
+        //FEN: Now the first byte of the data is checked to determine how to process the rest of the data
         if (pData[0] == 0xFB) {
           int pos = pData[1];
           for (int x = 0; x < len - 2; x++) {
@@ -166,8 +172,9 @@ class MyCallbacks: public BLECharacteristicCallbacks {
           Serial.println(tParts);
 
         } else if  (pData[0] == 0xFF) {
-          parts = (pData[1] * 256) + pData[2];
-          MTU = (pData[3] * 256) + pData[4];
+          //FEN: Header 0xFF means that RX is sending how many parts and what the MTU is
+          parts = (pData[1] * 256) + pData[2]; //FEN: treat byte 1 and byte 2 as one 16 bit number
+          MTU = (pData[3] * 256) + pData[4]; //FEN: ditto with byte 3 and 4
           MODE = UPDATE_MODE;
 
         }
@@ -279,11 +286,17 @@ void updateFromFS(fs::FS &fs) {
 void initBLE() {
   BLEDevice::init("ESP32 OTA");
   BLEServer *pServer = BLEDevice::createServer();
+  //FEN: Set the callbacks for the server itself. All it does is process connects/disconnects
   pServer->setCallbacks(new MyServerCallbacks());
 
+  //FEN: Create new service
   BLEService *pService = pServer->createService(SERVICE_UUID);
+  //FEN: Create Transmit Characteristic with NOTIFY flag
   pCharacteristicTX = pService->createCharacteristic(CHARACTERISTIC_UUID_TX, BLECharacteristic::PROPERTY_NOTIFY );
+  //FEN: Create Recieve Characteristic with write flags.
   pCharacteristicRX = pService->createCharacteristic(CHARACTERISTIC_UUID_RX, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  //FEN: Both characteristics share the same callback behavior. This is OK though because
+  // RX uses different callbacks since its a write one, than TX which only uses the notify ones
   pCharacteristicRX->setCallbacks(new MyCallbacks());
   pCharacteristicTX->setCallbacks(new MyCallbacks());
   pCharacteristicTX->addDescriptor(new BLE2902());
@@ -332,11 +345,16 @@ void loop() {
       if (deviceConnected) {
         digitalWrite(BUILTINLED, HIGH);
         if (sendMode) {
+          //FEN: If in normal mode and other RX characteristic is asking for sendMode (I think) then:
+          // we send a notify with the value 0xAA to say we are setting sendMode, then FASTMODE
+          // (either 0x00 or 0x01) depending is SPIFFS or FFAT is used
           uint8_t fMode[] = {0xAA, FASTMODE};
           pCharacteristicTX->setValue(fMode, 2);
           pCharacteristicTX->notify();
           delay(50);
           sendMode = false;
+          //FEN: Looking at the python script, it seems if its in fast mode, it sends the binary all
+          // in one chunk, wheras non-fast mode breaks up the binary into multiple sends
         }
 
         // your loop code here
