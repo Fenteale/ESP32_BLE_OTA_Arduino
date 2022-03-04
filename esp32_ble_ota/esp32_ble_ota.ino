@@ -136,8 +136,11 @@ class MyCallbacks: public BLECharacteristicCallbacks {
 
         //FEN: Now the first byte of the data is checked to determine how to process the rest of the data
         if (pData[0] == 0xFB) {
+          //FEN: as far as I can tell, 0xFB is the header for actual data being sent
           int pos = pData[1];
           for (int x = 0; x < len - 2; x++) {
+            //FEN: for the entire rest of the message, (after the header and position data is recieved),
+            // plump all leftover data into the currently selected buffer
             if (current) {
               updater[(pos * MTU) + x] = pData[x + 2];
             } else {
@@ -146,24 +149,35 @@ class MyCallbacks: public BLECharacteristicCallbacks {
           }
 
         } else if  (pData[0] == 0xFC) {
+          //FEN: 0xFC is Receive part length and position
           if (current) {
             writeLen = (pData[1] * 256) + pData[2];
           } else {
             writeLen2 = (pData[1] * 256) + pData[2];
           }
+          //FEN: I dont quite understand this. There are two write buffers,
+          // if "current" is false it writes to the first one, and if its
+          // true it writes to the second one... 
+          //FEN: It seems in this function, if 0xFC is received, it switches
+          // which buffer is getting written to
           current = !current;
           cur = (pData[3] * 256) + pData[4];
           writeFile = true;
           if (cur < parts - 1) {
+            //FEN: If its in slow mode, make a request for next part
             request = !FASTMODE;
           }
         } else if (pData[0] == 0xFD) {
+          //FEN: 0xFD gets sent at the start of the python script. I think this message type is just
+          // "get ready for an update"
           sendMode = true;
           if (FLASH.exists("/update.bin")) {
             FLASH.remove("/update.bin");
           }
         } else if (pData[0] == 0xFE) {
+          //FEN: 0xFE means its about to send how large the update file is
           rParts = 0;
+          //FEN: another multi-byte variable.  Looks like its a 32 bit number
           tParts = (pData[1] * 256 * 256 * 256) + (pData[2] * 256 * 256) + (pData[3] * 256) + pData[4];
 
           Serial.print("Available space: ");
@@ -175,7 +189,7 @@ class MyCallbacks: public BLECharacteristicCallbacks {
           //FEN: Header 0xFF means that RX is sending how many parts and what the MTU is
           parts = (pData[1] * 256) + pData[2]; //FEN: treat byte 1 and byte 2 as one 16 bit number
           MTU = (pData[3] * 256) + pData[4]; //FEN: ditto with byte 3 and 4
-          MODE = UPDATE_MODE;
+          MODE = UPDATE_MODE; //FEN: READY FOR ACTUALLY GETTING THE FILE!
 
         }
 
@@ -246,6 +260,8 @@ void performUpdate(Stream &updateSource, size_t updateSize) {
     result += "Not enough space for OTA";
   }
   if (deviceConnected) {
+    //FEN: This sends a message back to the other device that starts with header "0x0F"
+    // which means to interpret it as a status message
     sendOtaResult(result);
     delay(5000);
   }
@@ -369,6 +385,8 @@ void loop() {
     case UPDATE_MODE:
 
       if (request) {
+        //FEN: Sent when part is finished and ready for next one
+        //FEN: cur+1 is sent as two bytes to signal which part it wants next
         uint8_t rq[] = {0xF1, (cur + 1) / 256, (cur + 1) % 256};
         pCharacteristicTX->setValue(rq, 3);
         pCharacteristicTX->notify();
@@ -377,6 +395,8 @@ void loop() {
       }
 
       if (cur + 1 == parts) { // received complete file
+        //FEN: This is sent when the entire file is finished downloading
+        // and its about to actually perform the firmware update
         uint8_t com[] = {0xF2, (cur + 1) / 256, (cur + 1) % 256};
         pCharacteristicTX->setValue(com, 3);
         pCharacteristicTX->notify();
